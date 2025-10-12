@@ -1,0 +1,5 @@
+{
+  "name": "OjolBoost Dashboard",
+  "description": "A mobile dashboard for online motorcycle taxi drivers to analyze their weekly income, effective areas, busy hours, and the influence of weather on their orders.",
+  "requestFramePermissions": []
+}
