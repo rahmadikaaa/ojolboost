@@ -3,11 +3,24 @@ import React, { useState, useMemo } from 'react';
 import Header from './components/Header';
 import StatCard from './components/StatCard';
 import Filters from './components/Filters';
+import MaximDataParser from './components/MaximDataParser';
 import DailyEarningsChart from './components/DailyEarningsChart';
 import AreaHeatmapChart from './components/AreaHeatmapChart';
 import BusyHoursChart from './components/BusyHoursChart';
 import WeatherInfluenceChart from './components/WeatherInfluenceChart';
 import { DAILY_EARNINGS_DATA, TOP_AREAS_DATA, BUSY_HOURS_DATA, WEATHER_INFLUENCE_DATA, FILTER_OPTIONS_DATA } from './constants';
+
+interface DailyEarning {
+  day: string;
+  pendapatan: number;
+}
+
+interface ImportedData {
+  day: string;
+  date: string;
+  totalEarnings: number;
+  orderCount: number;
+}
 
 const App: React.FC = () => {
   const [filters, setFilters] = useState({
@@ -15,6 +28,8 @@ const App: React.FC = () => {
     weather: 'Semua Cuaca',
     app: 'Semua Aplikasi',
   });
+
+  const [earningsData, setEarningsData] = useState<DailyEarning[]>([]);
 
   const handleFilterChange = (filterType: string, value: string) => {
     setFilters(prevFilters => ({
@@ -26,9 +41,19 @@ const App: React.FC = () => {
     console.log(`Filter changed: ${filterType} = ${value}`);
   };
 
+  const handleMaximDataImport = (importedData: ImportedData[]) => {
+    const newData = importedData.map(item => ({
+      day: item.day,
+      pendapatan: item.totalEarnings,
+    }));
+    
+    setEarningsData(prevData => [...prevData, ...newData]);
+    alert(`✅ ${importedData.length} data berhasil diimport!`);
+  };
+
   const totalWeeklyEarnings = useMemo(() => {
-    return DAILY_EARNINGS_DATA.reduce((sum, day) => sum + day.pendapatan, 0);
-  }, []);
+    return earningsData.reduce((sum, day) => sum + day.pendapatan, 0);
+  }, [earningsData]);
 
   const formattedTotalEarnings = `Rp${totalWeeklyEarnings.toLocaleString()}`;
 
@@ -50,9 +75,12 @@ const App: React.FC = () => {
             value={formattedTotalEarnings}
             icon={<ReceiptIcon />}
           />
+
+          {/* Import Data Parser */}
+          <MaximDataParser onImport={handleMaximDataImport} />
           
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <DailyEarningsChart data={DAILY_EARNINGS_DATA} />
+            <DailyEarningsChart data={earningsData} />
             <AreaHeatmapChart data={TOP_AREAS_DATA} />
             <BusyHoursChart data={BUSY_HOURS_DATA} />
             <WeatherInfluenceChart data={WEATHER_INFLUENCE_DATA} />
