@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 
-interface DailyData {
+// 1. Definisi Interface agar data konsisten
+export interface DailyData {
   day: string;
   date: string;
   totalEarnings: number;
@@ -17,110 +18,88 @@ export default function MaximDataParser({ onImport }: MaximDataParserProps) {
   const [preview, setPreview] = useState<DailyData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
+  // 2. Fungsi Utama Parser
   const parseMaximData = (text: string): DailyData[] => {
-    const dailyMap = new Map<
-      string,
-      {
-        day: string;
-        date: string;
-        earnings: number;
-        count: number;
-      }
-    >();
-
+    const dailyMap = new Map<string, DailyData>();
     const lines = text.split('\n');
-    let currentDate = '';
-    let currentDay = '';
-    let totalEarnings = 0;
+    
+    let currentDisplayDate = ''; 
+    let currentDayName = '';
+    let dateKeyForSorting = ''; // Format: YYYYMMDD
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
+    lines.forEach((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
 
-      if (!line) continue;
-
-      // Match date pattern: DD.MM atau DD.MM.YYYY
-      const dateMatch = line.match(/^(\d{2})\.(\d{2})(?:\.(\d{4}))?$/);
+      // Cek apakah baris ini adalah Tanggal (Format: 01.02 atau 01.02.2024)
+      const dateMatch = trimmed.match(/^(\d{2})\.(\d{2})(?:\.(\d{4}))?$/);
       if (dateMatch) {
-        // Save previous day's data if exists
-        if (currentDate && totalEarnings > 0) {
-          const key = currentDate;
-          const existing = dailyMap.get(key) || {
-            day: currentDay,
-            date: currentDate,
-            earnings: 0,
-            count: 0,
-          };
-          existing.earnings += totalEarnings;
-          existing.count += 1;
-          dailyMap.set(key, existing);
-          totalEarnings = 0;
-        }
-
-        currentDate = line;
-        currentDay = getDayName(dateMatch[1], dateMatch[2], dateMatch[3] || new Date().getFullYear().toString());
-        continue;
+        const d = dateMatch[1];
+        const m = dateMatch[2];
+        const y = dateMatch[3] || new Date().getFullYear().toString();
+        
+        currentDisplayDate = `${d}.${m}.${y}`;
+        dateKeyForSorting = `${y}${m}${d}`;
+        currentDayName = getDayName(d, m, y);
+        return;
       }
 
-      // Match earnings: Rp followed by numbers
-      const earningsMatch = line.match(/^Rp(\d+)$/);
-      if (earningsMatch && currentDate) {
-        const amount = parseInt(earningsMatch[1], 10);
-        totalEarnings += amount;
+      // Cek apakah baris ini adalah Harga (Format: Rp21000 atau Rp 21.000)
+      // Regex ini menangkap angka setelah "Rp" dan mengabaikan titik/spasi
+      const earningsMatch = trimmed.match(/Rp\s?([\d.]+)/);
+      if (earningsMatch && currentDisplayDate) {
+        const amount = parseInt(earningsMatch[1].replace(/\./g, ''), 10);
+        
+        // Skip jika orderan Rp0 (biasanya orderan batal/ditolak)
+        if (amount <= 0) return;
+
+        const existing = dailyMap.get(currentDisplayDate) || {
+          day: currentDayName,
+          date: currentDisplayDate,
+          totalEarnings: 0,
+          orderCount: 0,
+          sortKey: dateKeyForSorting // Properti bantuan sementara untuk sorting
+        };
+
+        existing.totalEarnings += amount;
+        existing.orderCount += 1;
+        dailyMap.set(currentDisplayDate, existing);
       }
-    }
-
-    // Save last day's data
-    if (currentDate && totalEarnings > 0) {
-      const key = currentDate;
-      const existing = dailyMap.get(key) || {
-        day: currentDay,
-        date: currentDate,
-        earnings: 0,
-        count: 0,
-      };
-      existing.earnings += totalEarnings;
-      existing.count += 1;
-      dailyMap.set(key, existing);
-    }
-
-    // Convert map to array and sort by date (descending)
-    const result = Array.from(dailyMap.values()).sort((a, b) => {
-      return new Date(b.date).getTime() - new Date(a.date).getTime();
     });
 
-    return result;
+    // Ubah Map ke Array dan Urutkan dari tanggal terbaru ke terlama
+    return Array.from(dailyMap.values())
+      .sort((a: any, b: any) => b.sortKey.localeCompare(a.sortKey))
+      .map(({ day, date, totalEarnings, orderCount }) => ({
+        day, date, totalEarnings, orderCount
+      }));
   };
 
   const getDayName = (day: string, month: string, year: string): string => {
     try {
-      const d = parseInt(day, 10);
-      const m = parseInt(month, 10) - 1;
-      const y = parseInt(year, 10);
-      const date = new Date(y, m, d);
-      const dayNames = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-      return dayNames[date.getDay()];
+      const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      return new Intl.DateTimeFormat('id-ID', { weekday: 'short' }).format(date);
     } catch {
-      return 'Unknown';
+      return '???';
     }
   };
 
+  // 3. Handlers
   const handlePaste = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = e.target.value;
     setPastedData(text);
     setError('');
 
     if (text.trim()) {
+      setIsLoading(true);
       try {
-        setIsLoading(true);
         const parsed = parseMaximData(text);
         setPreview(parsed);
-
         if (parsed.length === 0) {
-          setError('⚠️ Data tidak terdeteksi. Pastikan format sesuai data Maxim');
+          setError('⚠️ Data tidak terdeteksi. Pastikan format tanggal (01.02) dan harga (Rp) benar.');
         }
       } catch (err) {
-        setError(`❌ Error parsing: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        setPreview([]);
+        setError('❌ Terjadi kesalahan saat membaca data.');
       } finally {
         setIsLoading(false);
       }
@@ -130,22 +109,10 @@ export default function MaximDataParser({ onImport }: MaximDataParserProps) {
   };
 
   const handleImport = () => {
-    if (preview.length === 0) {
-      setError('❌ Tidak ada data untuk diimport');
-      return;
+    if (preview.length > 0) {
+      onImport(preview);
+      handleClear();
     }
-
-    const importData = preview.map(item => ({
-      day: item.day,
-      date: item.date,
-      totalEarnings: item.earnings,
-      orderCount: item.count,
-    }));
-
-    onImport(importData);
-    setPastedData('');
-    setPreview([]);
-    setError('');
   };
 
   const handleClear = () => {
@@ -154,104 +121,101 @@ export default function MaximDataParser({ onImport }: MaximDataParserProps) {
     setError('');
   };
 
-  const totalEarnings = preview.reduce((sum, item) => sum + item.earnings, 0);
-  const totalOrders = preview.reduce((sum, item) => sum + item.count, 0);
+  const totalEarnings = preview.reduce((sum, item) => sum + item.totalEarnings, 0);
+  const totalOrders = preview.reduce((sum, item) => sum + item.orderCount, 0);
 
   return (
-    <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-lg shadow-lg p-6 mb-6 border border-slate-700">
-      <h2 className="text-xl font-bold mb-4 text-slate-100 flex items-center gap-2">
-        <span className="text-2xl">📱</span> Import Data Maxim/Gojek
-      </h2>
+    <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-2xl p-6 border border-slate-700 max-w-2xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <span className="bg-yellow-500 p-1.5 rounded-lg text-slate-900 text-sm">MAXIM</span> 
+          Import Riwayat
+        </h2>
+        {preview.length > 0 && (
+           <button onClick={handleClear} className="text-slate-400 hover:text-red-400 text-sm transition">
+             Bersihkan
+           </button>
+        )}
+      </div>
 
-      {/* Input Area */}
-      <div className="mb-4">
-        <label className="block text-sm font-semibold text-slate-300 mb-2">
-          Paste Riwayat Transaksi:
+      {/* Input Textarea */}
+      <div className="mb-6">
+        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">
+          Tempel Teks Riwayat Transaksi
         </label>
         <textarea
           value={pastedData}
           onChange={handlePaste}
-          placeholder="Copy-paste seluruh riwayat transaksi dari aplikasi Maxim"
-          className="w-full h-40 bg-slate-700 border-2 border-slate-600 rounded-lg p-3 font-mono text-sm text-slate-100 focus:border-blue-500 focus:outline-none resize-none placeholder-slate-500 transition"
+          placeholder="Contoh:&#10;01.02&#10;Rp15000&#10;Rp20000"
+          className="w-full h-32 bg-slate-950 border border-slate-700 rounded-xl p-4 font-mono text-sm text-blue-300 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition resize-none shadow-inner"
         />
       </div>
 
-      {/* Error Message */}
+      {/* Pesan Error */}
       {error && (
-        <div className="mb-4 p-3 bg-red-950 border border-red-700 text-red-200 rounded-lg text-sm">
+        <div className="mb-6 p-3 bg-red-500/10 border border-red-500/50 text-red-400 rounded-lg text-sm animate-pulse">
           {error}
         </div>
       )}
 
-      {/* Daily Summary Preview */}
+      {/* Preview Tabel */}
       {preview.length > 0 && (
-        <div className="mb-4">
-          <h3 className="font-semibold text-slate-200 mb-3 flex items-center gap-2">
-            <span>✅</span> Ringkasan Per Hari ({preview.length} hari, {totalOrders} order)
-          </h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse bg-slate-700 rounded-lg overflow-hidden">
-              <thead>
-                <tr className="bg-slate-600">
-                  <th className="border border-slate-500 p-3 text-left text-slate-200">Tanggal</th>
-                  <th className="border border-slate-500 p-3 text-center text-slate-200">Hari</th>
-                  <th className="border border-slate-500 p-3 text-right text-slate-200">Order</th>
-                  <th className="border border-slate-500 p-3 text-right text-slate-200">Total Pendapatan</th>
+        <div className="space-y-4 animate-in fade-in duration-500">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+              <p className="text-slate-400 text-xs uppercase">Total Order</p>
+              <p className="text-xl font-bold text-white">{totalOrders} <span className="text-sm font-normal text-slate-400">Trip</span></p>
+            </div>
+            <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700">
+              <p className="text-slate-400 text-xs uppercase">Total Pendapatan</p>
+              <p className="text-xl font-bold text-green-400">Rp {totalEarnings.toLocaleString('id-ID')}</p>
+            </div>
+          </div>
+
+          <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-700 scrollbar-thin scrollbar-thumb-slate-600">
+            <table className="w-full text-sm text-left border-collapse">
+              <thead className="sticky top-0 bg-slate-800 text-slate-300">
+                <tr>
+                  <th className="p-3">Hari / Tanggal</th>
+                  <th className="p-3 text-center">Order</th>
+                  <th className="p-3 text-right">Pendapatan</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-slate-800">
                 {preview.map((item, idx) => (
-                  <tr key={idx} className="border-t border-slate-600 hover:bg-slate-600 transition">
-                    <td className="border border-slate-500 p-3 text-slate-200 font-medium">{item.date}</td>
-                    <td className="border border-slate-500 p-3 text-center text-slate-300">{item.day}</td>
-                    <td className="border border-slate-500 p-3 text-right text-slate-300">{item.count}x</td>
-                    <td className="border border-slate-500 p-3 text-right font-bold text-green-400">
-                      Rp {item.earnings.toLocaleString('id-ID')}
+                  <tr key={idx} className="hover:bg-slate-800/30 transition">
+                    <td className="p-3 text-slate-300">
+                      <span className="font-bold text-blue-400">{item.day}</span>, {item.date}
+                    </td>
+                    <td className="p-3 text-center text-slate-400">{item.orderCount}x</td>
+                    <td className="p-3 text-right font-mono text-green-400">
+                      Rp{item.totalEarnings.toLocaleString('id-ID')}
                     </td>
                   </tr>
                 ))}
               </tbody>
-              <tfoot>
-                <tr className="bg-slate-600 font-bold text-slate-100">
-                  <td colSpan={2} className="border border-slate-500 p-3">Total</td>
-                  <td className="border border-slate-500 p-3 text-right">{totalOrders}x</td>
-                  <td className="border border-slate-500 p-3 text-right text-green-400">
-                    Rp {totalEarnings.toLocaleString('id-ID')}
-                  </td>
-                </tr>
-              </tfoot>
             </table>
           </div>
+
+          <button
+            onClick={handleImport}
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white py-3 rounded-xl font-bold shadow-lg shadow-blue-900/20 transition-all active:scale-[0.98]"
+          >
+            Konfirmasi & Simpan ke Database
+          </button>
         </div>
       )}
 
-      {/* Buttons */}
-      <div className="flex gap-2 mb-4">
-        <button
-          onClick={handleImport}
-          disabled={preview.length === 0 || isLoading}
-          className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-slate-600 text-white py-2 rounded-lg font-semibold transition disabled:cursor-not-allowed"
-        >
-          {isLoading ? '⏳ Processing...' : `✅ Import ${preview.length} Hari`}
-        </button>
-        <button
-          onClick={handleClear}
-          className="flex-1 bg-slate-600 hover:bg-slate-700 text-slate-200 py-2 rounded-lg font-semibold transition"
-        >
-          🗑️ Hapus
-        </button>
-      </div>
-
-      {/* Info Box */}
-      <div className="p-3 bg-slate-700 border border-slate-600 rounded-lg text-xs text-slate-300">
-        <p className="font-semibold mb-2">💡 Format yang diterima:</p>
-        <ul className="space-y-1 ml-4 list-disc text-slate-400">
-          <li>Tanggal: <code className="bg-slate-600 px-1 rounded text-slate-200">01.02</code> atau <code className="bg-slate-600 px-1 rounded text-slate-200">01.02.2026</code></li>
-          <li>Pendapatan: <code className="bg-slate-600 px-1 rounded text-slate-200">Rp2184</code></li>
-          <li>Secara otomatis menghitung total per hari</li>
-          <li>Menghilangkan order yang dibatalkan</li>
-        </ul>
-      </div>
+      {/* Petunjuk */}
+      {!preview.length && (
+        <div className="p-4 bg-slate-800/30 border border-dashed border-slate-700 rounded-xl">
+          <p className="text-xs text-slate-400 leading-relaxed">
+            <span className="text-slate-200 font-bold block mb-1">Cara Pakai:</span>
+            Buka aplikasi Maxim &gt; Riwayat &gt; Pilih Transaksi. Copy semua teks dan paste di sini. 
+            Sistem akan otomatis menjumlahkan pendapatan harian Anda.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
